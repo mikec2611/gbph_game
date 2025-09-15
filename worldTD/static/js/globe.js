@@ -1,6 +1,18 @@
 ﻿import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+const COLOR_CONFIG = Object.freeze({
+  hexFill: 0x2c3e50,        // Slate blue-gray
+  hexBorder: 0x95a5a6,      // Steel gray
+  pentagonFill: 0xf1c40f,   // Muted golden yellow
+  pentagonBorder: 0x7d6608, // Bronze/dark ochre
+  hoverBorder: 0x1abc9c,    // Bright teal glow
+  activeHexFill: 0x27ae60,  // Vibrant emerald
+});
+
+const hoverBorderColor = new THREE.Color(COLOR_CONFIG.hoverBorder);
+const activeHexColor = new THREE.Color(COLOR_CONFIG.activeHexFill);
+
 const container = document.getElementById("globe-container");
 if (!container) {
   throw new Error("Globe container element missing from the page.");
@@ -35,7 +47,7 @@ controls.update();
 
 const globeRadius = 5;
 const tileThickness = globeRadius * 0.22;
-const frequency = 1; // Goldberg G(3,0) -> 12 pentagons + 80 hexagons = 92 tiles
+const frequency = 10; // Goldberg G(3,0) -> 12 pentagons + 80 hexagons = 92 tiles
 
 const globeGroup = new THREE.Group();
 scene.add(globeGroup);
@@ -70,8 +82,7 @@ tileGroup.traverse((child) => {
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let hoveredTile = null;
-const highlightColor = new THREE.Color(0xffec6b);
-const emissiveBoost = 0.55;
+let activeHexTile = null;
 
 function updatePointer(event) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -83,8 +94,8 @@ function resetHover() {
   if (!hoveredTile) {
     return;
   }
-  hoveredTile.material.color.copy(hoveredTile.userData.baseColor);
-  hoveredTile.material.emissiveIntensity = hoveredTile.userData.baseEmissive;
+  hoveredTile.userData.border.material.color.copy(hoveredTile.userData.baseBorder);
+  hoveredTile.userData.border.material.needsUpdate = true;
   hoveredTile = null;
 }
 
@@ -94,8 +105,27 @@ function applyHover(mesh) {
   }
   resetHover();
   hoveredTile = mesh;
-  mesh.material.color.copy(highlightColor);
-  mesh.material.emissiveIntensity = emissiveBoost;
+  mesh.userData.border.material.color.copy(hoverBorderColor);
+  mesh.userData.border.material.needsUpdate = true;
+}
+
+function setActiveTile(mesh) {
+  if (mesh.userData.sides !== 6) {
+    return;
+  }
+  if (activeHexTile === mesh) {
+    mesh.material.color.copy(mesh.userData.baseFill);
+    mesh.userData.active = false;
+    activeHexTile = null;
+    return;
+  }
+  if (activeHexTile) {
+    activeHexTile.material.color.copy(activeHexTile.userData.baseFill);
+    activeHexTile.userData.active = false;
+  }
+  activeHexTile = mesh;
+  mesh.material.color.copy(activeHexColor);
+  mesh.userData.active = true;
 }
 
 function handlePointerMove(event) {
@@ -109,10 +139,22 @@ function handlePointerMove(event) {
   }
 }
 
-renderer.domElement.addEventListener("pointermove", handlePointerMove);
-renderer.domElement.addEventListener("pointerleave", resetHover);
+function handlePointerLeave() {
+  resetHover();
+}
 
-const clock = new THREE.Clock();
+function handlePointerClick(event) {
+  updatePointer(event);
+  raycaster.setFromCamera(pointer, camera);
+  const intersections = raycaster.intersectObjects(interactiveTiles, false);
+  if (intersections.length > 0) {
+    setActiveTile(intersections[0].object);
+  }
+}
+
+renderer.domElement.addEventListener("pointermove", handlePointerMove);
+renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
+renderer.domElement.addEventListener("click", handlePointerClick);
 
 function resizeRenderer() {
   const { clientWidth, clientHeight } = container;
@@ -124,8 +166,6 @@ function resizeRenderer() {
 window.addEventListener("resize", resizeRenderer);
 
 function animate() {
-  const delta = clock.getDelta();
-  globeGroup.rotation.y += delta * 0.12;
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
@@ -157,7 +197,6 @@ function createGoldbergSphere(radius, thickness, frequency) {
   });
 
   const tileGroup = new THREE.Group();
-  const scratchColor = new THREE.Color();
   const counts = { pentagon: 0, hexagon: 0 };
 
   for (let vIndex = 0; vIndex < positions.length; vIndex += 1) {
@@ -216,30 +255,42 @@ function createGoldbergSphere(radius, thickness, frequency) {
     geometry.applyMatrix4(basis);
     geometry.translate(centerPoint.x, centerPoint.y, centerPoint.z);
 
+    const isPentagon = ringPoints.length === 5;
+    const fillColor = new THREE.Color(
+      isPentagon ? COLOR_CONFIG.pentagonFill : COLOR_CONFIG.hexFill
+    );
+    const borderColor = new THREE.Color(
+      isPentagon ? COLOR_CONFIG.pentagonBorder : COLOR_CONFIG.hexBorder
+    );
+
     const material = new THREE.MeshStandardMaterial({
+      color: fillColor.clone(),
       roughness: 0.45,
       metalness: 0.22,
-      emissive: new THREE.Color(0x050a16),
-      emissiveIntensity: 0.25,
+      emissive: new THREE.Color(0x000000),
+      emissiveIntensity: 0.05,
       flatShading: true,
     });
-
-    const latNormalized = THREE.MathUtils.clamp((normal.y + 1) * 0.5, 0, 1);
-    const hue = THREE.MathUtils.lerp(0.58, 0.08, latNormalized);
-    const lightness = THREE.MathUtils.lerp(0.35, 0.58, latNormalized);
-    scratchColor.setHSL(hue, 0.72, lightness);
-    material.color.copy(scratchColor);
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = false;
     mesh.receiveShadow = true;
+
+    const border = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({ color: borderColor.clone() })
+    );
+    mesh.add(border);
+
     mesh.userData = {
-      baseColor: scratchColor.clone(),
-      baseEmissive: material.emissiveIntensity,
+      baseFill: fillColor.clone(),
+      baseBorder: borderColor.clone(),
+      border,
       sides: ringPoints.length,
+      active: false,
     };
 
-    if (ringPoints.length === 5) {
+    if (isPentagon) {
       counts.pentagon += 1;
     } else {
       counts.hexagon += 1;
