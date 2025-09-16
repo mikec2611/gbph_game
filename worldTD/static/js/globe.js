@@ -20,10 +20,13 @@ if (!container) {
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(container.clientWidth, container.clientHeight);
 renderer.setClearColor(0x02040b, 1);
 container.appendChild(renderer.domElement);
+renderer.domElement.style.touchAction = "none";
+renderer.domElement.style.width = "100%";
+renderer.domElement.style.height = "100%";
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x02040b, 18, 38);
@@ -83,6 +86,11 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let hoveredTile = null;
 let activeHexTile = null;
+let touchPointerDown = null;
+
+function isTouchLike(event) {
+  return event.pointerType === "touch" || event.pointerType === "pen";
+}
 
 function updatePointer(event) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -129,6 +137,9 @@ function setActiveTile(mesh) {
 }
 
 function handlePointerMove(event) {
+  if (isTouchLike(event) && !event.isPrimary) {
+    return;
+  }
   updatePointer(event);
   raycaster.setFromCamera(pointer, camera);
   const intersections = raycaster.intersectObjects(interactiveTiles, false);
@@ -144,17 +155,21 @@ function handlePointerLeave() {
 }
 
 function handlePointerClick(event) {
-  updatePointer(event);
-  raycaster.setFromCamera(pointer, camera);
-  const intersections = raycaster.intersectObjects(interactiveTiles, false);
-  if (intersections.length > 0) {
-    setActiveTile(intersections[0].object);
-  }
+  selectTileUnderPointer(event);
 }
 
 renderer.domElement.addEventListener("pointermove", handlePointerMove);
 renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
 renderer.domElement.addEventListener("click", handlePointerClick);
+renderer.domElement.addEventListener("pointerdown", handlePointerDown, {
+  passive: true,
+});
+renderer.domElement.addEventListener("pointerup", handlePointerUp, {
+  passive: false,
+});
+renderer.domElement.addEventListener("pointercancel", () => {
+  touchPointerDown = null;
+});
 
 function resizeRenderer() {
   const { clientWidth, clientHeight } = container;
@@ -164,6 +179,10 @@ function resizeRenderer() {
 }
 
 window.addEventListener("resize", resizeRenderer);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", resizeRenderer);
+  window.visualViewport.addEventListener("scroll", resizeRenderer);
+}
 
 function animate() {
   controls.update();
@@ -173,6 +192,49 @@ function animate() {
 
 resizeRenderer();
 animate();
+
+function selectTileUnderPointer(event) {
+  updatePointer(event);
+  raycaster.setFromCamera(pointer, camera);
+  const intersections = raycaster.intersectObjects(interactiveTiles, false);
+  if (intersections.length > 0) {
+    setActiveTile(intersections[0].object);
+  }
+}
+
+function handlePointerDown(event) {
+  if (!isTouchLike(event) || !event.isPrimary) {
+    touchPointerDown = null;
+    return;
+  }
+  touchPointerDown = {
+    x: event.clientX,
+    y: event.clientY,
+    time: performance.now(),
+    id: event.pointerId,
+  };
+}
+
+function handlePointerUp(event) {
+  if (!touchPointerDown || touchPointerDown.id !== event.pointerId) {
+    touchPointerDown = null;
+    return;
+  }
+  const dx = event.clientX - touchPointerDown.x;
+  const dy = event.clientY - touchPointerDown.y;
+  const elapsed = performance.now() - touchPointerDown.time;
+  touchPointerDown = null;
+  const movementThreshold = 15;
+  const durationThreshold = 450;
+  if (dx * dx + dy * dy > movementThreshold * movementThreshold) {
+    return;
+  }
+  if (elapsed > durationThreshold) {
+    return;
+  }
+  event.preventDefault();
+  selectTileUnderPointer(event);
+}
 
 function createGoldbergSphere(radius, thickness, frequency) {
   const { positions, faces } = buildGeodesicSphere(frequency);

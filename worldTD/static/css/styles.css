@@ -24,3 +24,15 @@ body {
   border-radius: 0;
   box-shadow: none;
 }
+
+canvas {
+  display: block;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@supports (height: 100dvh) {
+  #globe-container {
+    height: 100dvh;
+  }
+}
