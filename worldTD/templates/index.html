@@ -15,6 +15,9 @@
     </script>
   </head>
   <body>
+    <div id="hud" aria-live="polite" aria-atomic="true">
+      <span id="wave-counter">Preparing Wave 1 / 10</span>
+    </div>
     <div id="globe-container" aria-label="Interactive hex globe" role="application"></div>
 
     <script src="{{ url_for('static', filename='js/globe.js') }}" type="module"></script>

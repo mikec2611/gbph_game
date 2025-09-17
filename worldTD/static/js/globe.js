@@ -48,6 +48,8 @@ controls.enablePan = false;
 controls.target.set(0, 0, 0);
 controls.update();
 
+const clock = new THREE.Clock();
+
 const globeRadius = 5;
 const tileThickness = globeRadius * 0.22;
 const frequency = 10; // Goldberg G(3,0) -> 12 pentagons + 80 hexagons = 92 tiles
@@ -81,6 +83,280 @@ tileGroup.traverse((child) => {
     interactiveTiles.push(child);
   }
 });
+
+const pentagonTiles = interactiveTiles.filter((tile) => tile.userData.sides === 5);
+const referenceHexTile = interactiveTiles.find((tile) => tile.userData.sides === 6);
+const baseHexRadius = referenceHexTile?.userData.tileRadius ?? tileThickness * 0.75;
+const ENEMY_RADIUS = baseHexRadius * 0.8;
+const ENEMY_TRAVEL_RADIUS = globeRadius + tileThickness + ENEMY_RADIUS * 0.9;
+const ENEMY_ANGULAR_SPEED = Math.PI / 12;
+
+const enemyGroup = new THREE.Group();
+globeGroup.add(enemyGroup);
+
+const enemyColor = new THREE.Color(0xe74c3c);
+const enemyGeometry = new THREE.SphereGeometry(ENEMY_RADIUS, 16, 16);
+const enemyMaterial = new THREE.MeshStandardMaterial({
+  color: enemyColor.clone(),
+  emissive: enemyColor.clone().multiplyScalar(0.4),
+  roughness: 0.35,
+  metalness: 0.2,
+});
+
+const waveConfig = Object.freeze({
+  totalWaves: 10,
+  enemiesPerWave: 10,
+  spawnInterval: 0.8,
+  spawnVariance: 0.3,
+  initialDelay: 1.5,
+  breakDuration: 2.4,
+});
+
+const waveState = {
+  currentWaveIndex: -1,
+  enemiesSpawned: 0,
+  pendingWaveDelay: waveConfig.initialDelay,
+  waveActive: false,
+  wavesComplete: false,
+  activeRoute: null,
+};
+
+const enemies = [];
+let spawnCountdown = waveConfig.spawnInterval;
+const tmpDirection = new THREE.Vector3();
+const tmpQuaternion = new THREE.Quaternion();
+const tmpAxis = new THREE.Vector3();
+
+const waveCounterElement = document.getElementById("wave-counter");
+if (!waveCounterElement) {
+  throw new Error("Wave counter element missing from the page.");
+}
+updateWaveCounter();
+
+function getNextSpawnTimer() {
+  const offset = (Math.random() - 0.5) * waveConfig.spawnVariance;
+  return Math.max(0.2, waveConfig.spawnInterval + offset);
+}
+
+function selectWaveRoute() {
+  if (pentagonTiles.length < 2) {
+    return null;
+  }
+  const spawnIndex = Math.floor(Math.random() * pentagonTiles.length);
+  let targetIndex = spawnIndex;
+  let attempts = 0;
+  while (targetIndex === spawnIndex && attempts < pentagonTiles.length * 2) {
+    targetIndex = Math.floor(Math.random() * pentagonTiles.length);
+    attempts += 1;
+  }
+  if (targetIndex === spawnIndex) {
+    targetIndex = (spawnIndex + 1) % pentagonTiles.length;
+  }
+  return {
+    spawnTile: pentagonTiles[spawnIndex],
+    targetTile: pentagonTiles[targetIndex],
+  };
+}
+
+function startNextWave() {
+  waveState.currentWaveIndex += 1;
+  waveState.pendingWaveDelay = 0;
+  if (waveState.currentWaveIndex >= waveConfig.totalWaves) {
+    waveState.wavesComplete = true;
+    waveState.waveActive = false;
+    waveState.activeRoute = null;
+    updateWaveCounter();
+    return;
+  }
+
+  const route = selectWaveRoute();
+  if (!route) {
+    waveState.wavesComplete = true;
+    waveState.waveActive = false;
+    waveState.activeRoute = null;
+    updateWaveCounter();
+    return;
+  }
+
+  waveState.activeRoute = route;
+  waveState.enemiesSpawned = 0;
+  waveState.waveActive = true;
+  spawnCountdown = Math.max(0.2, waveConfig.spawnInterval * 0.5);
+  updateWaveCounter();
+}
+
+function queueNextWave(delay = waveConfig.breakDuration) {
+  waveState.pendingWaveDelay = Math.max(0, delay);
+  waveState.waveActive = false;
+  waveState.activeRoute = null;
+  updateWaveCounter();
+}
+
+function updateWaveCounter() {
+  if (waveState.wavesComplete) {
+    waveCounterElement.textContent = `Wave ${waveConfig.totalWaves} / ${waveConfig.totalWaves} — Complete`;
+    return;
+  }
+
+  if (waveState.currentWaveIndex < 0) {
+    waveCounterElement.textContent = `Preparing Wave 1 / ${waveConfig.totalWaves}`;
+    return;
+  }
+
+  const waveNumber = waveState.currentWaveIndex + 1;
+  if (waveState.waveActive) {
+    const spawnsRemaining = Math.max(
+      waveConfig.enemiesPerWave - waveState.enemiesSpawned,
+      0
+    );
+    const statusLabel = spawnsRemaining > 0 ? `${spawnsRemaining} inbound` : "Engaged";
+    waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves} — ${statusLabel}`;
+    return;
+  }
+
+  if (waveState.pendingWaveDelay > 0) {
+    if (waveState.enemiesSpawned >= waveConfig.enemiesPerWave) {
+      waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves} — Cleared`;
+    } else {
+      const nextWaveNumber = Math.min(
+        waveState.currentWaveIndex + 2,
+        waveConfig.totalWaves
+      );
+      waveCounterElement.textContent = `Preparing Wave ${nextWaveNumber} / ${waveConfig.totalWaves}`;
+    }
+    return;
+  }
+
+  waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves}`;
+}
+
+function spawnEnemy(spawnTileOverride, targetTileOverride) {
+  if (pentagonTiles.length < 2) {
+    return false;
+  }
+
+  const spawnTile =
+    spawnTileOverride ??
+    pentagonTiles[Math.floor(Math.random() * pentagonTiles.length)];
+
+  let targetTile = targetTileOverride ?? spawnTile;
+  let attempts = 0;
+  while (targetTile === spawnTile && attempts < pentagonTiles.length * 2) {
+    targetTile = pentagonTiles[Math.floor(Math.random() * pentagonTiles.length)];
+    attempts += 1;
+  }
+  if (targetTile === spawnTile) {
+    return false;
+  }
+
+  const enemyMesh = new THREE.Mesh(enemyGeometry, enemyMaterial);
+  enemyMesh.castShadow = false;
+  enemyMesh.receiveShadow = false;
+  enemyGroup.add(enemyMesh);
+
+  const startDirection = spawnTile.userData.normal.clone();
+  const endDirection = targetTile.userData.normal.clone();
+  const arc = startDirection.angleTo(endDirection);
+
+  if (!Number.isFinite(arc) || arc <= 0) {
+    enemyGroup.remove(enemyMesh);
+    return false;
+  }
+
+  tmpAxis.copy(startDirection).cross(endDirection);
+  if (tmpAxis.lengthSq() < 1e-6) {
+    const referenceAxis =
+      Math.abs(startDirection.y) < 0.9
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(1, 0, 0);
+    tmpAxis.copy(startDirection).cross(referenceAxis);
+  }
+  if (tmpAxis.lengthSq() < 1e-6) {
+    tmpAxis.set(0, 0, 1);
+  }
+  tmpAxis.normalize();
+
+  const travelDuration = Math.max(arc / ENEMY_ANGULAR_SPEED, 0.5);
+  enemyMesh.position.copy(startDirection).multiplyScalar(ENEMY_TRAVEL_RADIUS);
+
+  enemies.push({
+    mesh: enemyMesh,
+    startDirection,
+    targetDirection: endDirection,
+    rotationAxis: tmpAxis.clone(),
+    arc,
+    progress: 0,
+    travelDuration,
+    travelRadius: ENEMY_TRAVEL_RADIUS,
+    waveIndex: waveState.waveActive ? waveState.currentWaveIndex : null,
+  });
+
+  return true;
+}
+
+function updateEnemies(delta) {
+  if (!waveState.wavesComplete) {
+    if (!waveState.waveActive) {
+      if (waveState.pendingWaveDelay > 0) {
+        waveState.pendingWaveDelay -= delta;
+        if (waveState.pendingWaveDelay <= 0) {
+          startNextWave();
+        }
+      }
+    } else if (waveState.enemiesSpawned < waveConfig.enemiesPerWave) {
+      spawnCountdown -= delta;
+      if (spawnCountdown <= 0) {
+        const spawned = spawnEnemy(
+          waveState.activeRoute?.spawnTile,
+          waveState.activeRoute?.targetTile
+        );
+        if (spawned) {
+          waveState.enemiesSpawned += 1;
+        }
+        spawnCountdown = getNextSpawnTimer();
+        updateWaveCounter();
+      }
+    }
+  }
+
+  for (let i = enemies.length - 1; i >= 0; i -= 1) {
+    const enemy = enemies[i];
+    enemy.progress += delta / enemy.travelDuration;
+
+    if (enemy.progress >= 1) {
+      enemyGroup.remove(enemy.mesh);
+      enemies.splice(i, 1);
+      continue;
+    }
+
+    const rotationAngle = enemy.arc * Math.min(enemy.progress, 1);
+    const travelRadius = enemy.travelRadius ?? ENEMY_TRAVEL_RADIUS;
+    tmpQuaternion.setFromAxisAngle(enemy.rotationAxis, rotationAngle);
+    tmpDirection
+      .copy(enemy.startDirection)
+      .applyQuaternion(tmpQuaternion)
+      .multiplyScalar(travelRadius);
+
+    enemy.mesh.position.copy(tmpDirection);
+  }
+
+  const waveFinished =
+    waveState.waveActive &&
+    waveState.enemiesSpawned >= waveConfig.enemiesPerWave &&
+    enemies.length === 0;
+
+  if (waveFinished) {
+    if (waveState.currentWaveIndex >= waveConfig.totalWaves - 1) {
+      waveState.wavesComplete = true;
+      waveState.waveActive = false;
+      waveState.activeRoute = null;
+      waveState.pendingWaveDelay = 0;
+      updateWaveCounter();
+    } else {
+      queueNextWave();
+    }
+  }
+}
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -185,7 +461,9 @@ if (window.visualViewport) {
 }
 
 function animate() {
+  const delta = clock.getDelta();
   controls.update();
+  updateEnemies(delta);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -297,6 +575,10 @@ function createGoldbergSphere(radius, thickness, frequency) {
 
     const inflation = 1.012;
     ringPoints.forEach((pt) => pt.multiplyScalar(inflation));
+    const ringRadius = ringPoints.reduce(
+      (max, pt) => Math.max(max, Math.hypot(pt.x, pt.y)),
+      0
+    );
 
     const shape = new THREE.Shape();
     ringPoints.forEach((pt, idx) => {
@@ -350,6 +632,9 @@ function createGoldbergSphere(radius, thickness, frequency) {
       border,
       sides: ringPoints.length,
       active: false,
+      normal: normal.clone(),
+      center: centerPoint.clone(),
+      tileRadius: ringRadius,
     };
 
     if (isPentagon) {

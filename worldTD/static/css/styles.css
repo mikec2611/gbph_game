@@ -36,3 +36,27 @@ canvas {
     height: 100dvh;
   }
 }
+
+#hud {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  background: rgba(8, 14, 28, 0.7);
+  border: 1px solid rgba(64, 132, 255, 0.4);
+  border-radius: 12px;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+  z-index: 20;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+#wave-counter {
+  font-weight: 600;
+  color: #f6f8ff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
