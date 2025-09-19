@@ -65,3 +65,7 @@ export const WAVE_CONFIG = Object.freeze({
 });
 
 export const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
+export const PLAYER_CONFIG = Object.freeze({
+  initialLives: 20,
+});

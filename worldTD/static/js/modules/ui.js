@@ -1,4 +1,4 @@
-﻿import { WAVE_CONFIG } from "./constants.js";
+import { WAVE_CONFIG, PLAYER_CONFIG } from "./constants.js";
 
 function getTotalWaves() {
   return Array.isArray(WAVE_CONFIG.waves) ? WAVE_CONFIG.waves.length : 0;
@@ -18,6 +18,7 @@ export function initUI({
   onStartGame,
   onMenuToggle,
   onBuildRequest,
+  onPlayAgain,
 } = {}) {
   const waveCounterElement = document.getElementById("wave-counter");
   if (!waveCounterElement) {
@@ -35,13 +36,28 @@ export function initUI({
   const buildMenu = document.getElementById("build-menu");
   const buildMenuStatus = document.getElementById("build-menu-status");
   const buildButton = document.getElementById("build-basic-tower");
+  const gameOverOverlay = document.getElementById("game-over");
+  const gameOverAction = document.getElementById("game-over-action");
+  const gameOverMessage = document.getElementById("game-over-message");
+  const lifeCounterElement = document.getElementById("life-counter");
+  if (!lifeCounterElement) {
+    throw new Error("Life counter element missing from the page.");
+  }
 
   if (!buildMenu || !buildMenuStatus || !buildButton) {
     throw new Error("Build menu elements missing from the page.");
   }
 
+  if (!gameOverOverlay || !gameOverAction || !gameOverMessage) {
+    throw new Error("Game over elements missing from the page.");
+  }
+
   if (typeof onBuildRequest === "function") {
     buildButton.addEventListener("click", onBuildRequest);
+  }
+
+  if (typeof onPlayAgain === "function") {
+    gameOverAction.addEventListener("click", onPlayAgain);
   }
 
   if (gameMenu) {
@@ -72,6 +88,8 @@ export function initUI({
     },
     timeUntilNextWave: WAVE_CONFIG.initialDelay ?? 10,
   });
+
+  updateLifeCounter(PLAYER_CONFIG.initialLives ?? 0);
 
   let gameHasStarted = false;
 
@@ -128,7 +146,7 @@ export function initUI({
   }
 
   function updateWaveCounter({ waveState, timeUntilNextWave }) {
-    const totalWaves = getTotalWaves();
+    const totalWaves = Math.max(getTotalWaves(), 1);
     const currentIndex = Math.max(waveState.currentWaveIndex, 0);
     const enemiesForWave = getWaveEnemyCount(currentIndex);
 
@@ -192,6 +210,34 @@ export function initUI({
     }
   }
 
+  function updateLifeCounter(lives) {
+    const safeLives = Number.isFinite(lives) ? Math.max(Math.floor(lives), 0) : 0;
+    lifeCounterElement.textContent = `Player Lives: ${safeLives}`;
+  }
+
+  function showGameOver({ waveNumber, wavesComplete } = {}) {
+    if (wavesComplete) {
+      gameOverMessage.textContent = "You survived every wave!";
+    } else if (Number.isFinite(waveNumber) && waveNumber > 0) {
+      const safeWave = Math.max(Math.floor(waveNumber), 1);
+      gameOverMessage.textContent = `You made it to Wave ${safeWave}.`;
+    } else {
+      gameOverMessage.textContent = "You made it to the final wave.";
+    }
+
+    gameOverOverlay.classList.add("is-visible");
+    gameOverOverlay.setAttribute("aria-hidden", "false");
+    queueMicrotask(() => gameOverAction.focus({ preventScroll: true }));
+  }
+
+  function hideGameOver() {
+    if (!gameOverOverlay.classList.contains("is-visible")) {
+      return;
+    }
+    gameOverOverlay.classList.remove("is-visible");
+    gameOverOverlay.setAttribute("aria-hidden", "true");
+  }
+
   return {
     waveCounterElement,
     waveTimerElement,
@@ -202,9 +248,23 @@ export function initUI({
     buildButton,
     updateWaveCounter,
     updateBuildMenu,
+    updateLifeCounter,
+    showGameOver,
+    hideGameOver,
     openGameMenu,
     closeGameMenu,
     setMenuToggleEnabled,
     setGameStarted,
   };
 }
+
+
+
+
+
+
+
+
+
+
+

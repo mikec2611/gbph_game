@@ -1,4 +1,4 @@
-﻿import * as THREE from "three";
+import * as THREE from "three";
 import { initScene } from "./modules/scene.js";
 import { createHalo, createGoldbergSphere } from "./modules/geometry.js";
 import { buildTileGraph } from "./modules/pathfinding.js";
@@ -6,7 +6,7 @@ import { initUI } from "./modules/ui.js";
 import { createTowerManager } from "./modules/towers.js";
 import { createWaveController } from "./modules/waves.js";
 import { createInteractionController } from "./modules/interactions.js";
-import { GLOBE_CONFIG, WORLD_UP } from "./modules/constants.js";
+import { GLOBE_CONFIG, WORLD_UP, PLAYER_CONFIG } from "./modules/constants.js";
 
 const { container, renderer, scene, camera, controls, globeGroup, clock } = initScene();
 
@@ -43,7 +43,14 @@ globeGroup.add(towerEffectGroup);
 
 const tileGraph = buildTileGraph(interactiveTiles);
 
-const ui = initUI();
+const ui = initUI({
+  onPlayAgain: startNewGame,
+});
+
+const INITIAL_LIVES = Number.isFinite(PLAYER_CONFIG.initialLives) ? Math.max(Math.floor(PLAYER_CONFIG.initialLives), 0) : 0;
+let lives = INITIAL_LIVES;
+let isGameOver = false;
+ui.updateLifeCounter(lives);
 
 const waveController = createWaveController({
   globeRadius,
@@ -54,6 +61,7 @@ const waveController = createWaveController({
   endPointTile,
   tileGraph,
   updateWaveCounter: ui.updateWaveCounter,
+  onEnemyReachedEnd: handleEnemyReachedEnd,
 });
 
 const towerManager = createTowerManager({
@@ -126,6 +134,9 @@ function closeGameMenu(options) {
 }
 
 function startNewGame() {
+  isGameOver = false;
+  ui.hideGameOver();
+  resetLives();
   towerManager.clearTowers(interactiveTiles);
   waveController.startNewGame();
   interactionController.resetHover();
@@ -139,6 +150,39 @@ function startNewGame() {
   }
 }
 
+function resetLives() {
+  lives = INITIAL_LIVES;
+  ui.updateLifeCounter(lives);
+}
+
+function handleEnemyReachedEnd() {
+  if (isGameOver) {
+    return;
+  }
+  lives = Math.max(lives - 1, 0);
+  ui.updateLifeCounter(lives);
+  if (lives <= 0) {
+    triggerGameOver();
+  }
+}
+
+function triggerGameOver() {
+  if (isGameOver) {
+    return;
+  }
+  isGameOver = true;
+  interactionController.resetHover();
+  towerManager.resetActiveTile();
+  towerManager.clearShots();
+  waveController.clearAllEnemies();
+  waveController.clearWaveRouteHighlight();
+  const currentWaveNumber = Math.max(waveController.waveState.currentWaveIndex + 1, 1);
+  ui.showGameOver({
+    waveNumber: currentWaveNumber,
+    wavesComplete: waveController.waveState.wavesComplete,
+  });
+  ui.setMenuToggleEnabled(false);
+}
 function centerCameraOnEndTile() {
   const targetTile = waveController.waveState.endTile ?? endPointTile;
   if (!targetTile) {
@@ -174,11 +218,19 @@ if (window.visualViewport) {
 function animate() {
   const delta = clock.getDelta();
   controls.update();
-  waveController.update(delta);
-  towerManager.update(delta, waveController.getActiveEnemies());
+  if (!isGameOver) {
+    waveController.update(delta);
+    towerManager.update(delta, waveController.getActiveEnemies());
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
 
 resizeRenderer();
 animate();
+
+
+
+
+
+

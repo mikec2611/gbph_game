@@ -28,6 +28,7 @@ export function createWaveController({
   endPointTile,
   tileGraph,
   updateWaveCounter,
+  onEnemyReachedEnd,
 }) {
   if (!enemyGroup) {
     throw new Error("Enemy group missing from wave controller initialization.");
@@ -585,6 +586,12 @@ export function createWaveController({
 
       while (remainingDelta > 0 && !enemyRemoved) {
         if (enemy.segmentIndex >= enemy.pathVectors.length - 1) {
+          if (typeof onEnemyReachedEnd === "function") {
+            onEnemyReachedEnd({
+              enemy,
+              waveIndex: waveState.currentWaveIndex,
+            });
+          }
           enemyGroup.remove(enemy.mesh);
           enemies.splice(i, 1);
           enemyRemoved = true;
@@ -611,6 +618,12 @@ export function createWaveController({
         enemy.segmentIndex += 1;
 
         if (enemy.segmentIndex >= enemy.pathVectors.length - 1) {
+          if (typeof onEnemyReachedEnd === "function") {
+            onEnemyReachedEnd({
+              enemy,
+              waveIndex: waveState.currentWaveIndex,
+            });
+          }
           enemyGroup.remove(enemy.mesh);
           enemies.splice(i, 1);
           enemyRemoved = true;
