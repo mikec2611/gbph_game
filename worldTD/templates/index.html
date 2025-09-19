@@ -18,6 +18,23 @@
     <div id="hud" aria-live="polite" aria-atomic="true">
       <span id="wave-counter">Preparing Wave 1 / 10</span>
     </div>
+    <button id="menu-toggle" type="button" aria-haspopup="dialog" aria-controls="game-menu" aria-expanded="true">Menu</button>
+    <div id="game-menu" role="dialog" aria-modal="true" class="is-visible">
+      <div class="menu-panel">
+        <h1>World Tower Defense</h1>
+        <p>Keep creeps from reaching the red pentagon. Build towers to bend their routes across the globe.</p>
+        <ul>
+          <li>Click a hex to select it, then press the tower button or hit <kbd>1</kbd>.</li>
+          <li>Towers reroute paths—use them to lengthen the journey to the end point.</li>
+          <li>Use the menu to pause, reread these tips, or start a fresh run any time.</li>
+        </ul>
+        <button id="game-menu-action" type="button">Start Game</button>
+      </div>
+    </div>
+    <div id="build-menu" role="dialog" aria-hidden="true">
+      <p id="build-menu-status">Select a hex to build.</p>
+      <button id="build-basic-tower" type="button">Build Sentinel Tower</button>
+    </div>
     <div id="globe-container" aria-label="Interactive hex globe" role="application"></div>
 
     <script src="{{ url_for('static', filename='js/globe.js') }}" type="module"></script>

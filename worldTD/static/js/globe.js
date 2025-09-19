@@ -12,6 +12,7 @@ const COLOR_CONFIG = Object.freeze({
 
 const hoverBorderColor = new THREE.Color(COLOR_CONFIG.hoverBorder);
 const activeHexColor = new THREE.Color(COLOR_CONFIG.activeHexFill);
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 const container = document.getElementById("globe-container");
 if (!container) {
@@ -84,11 +85,21 @@ tileGroup.traverse((child) => {
   }
 });
 
+const tileGraph = new Map();
+
+buildTileGraph(interactiveTiles);
+
 const pentagonTiles = interactiveTiles.filter((tile) => tile.userData.sides === 5);
+const endPointTile =
+  pentagonTiles.length > 0
+    ? pentagonTiles[Math.floor(Math.random() * pentagonTiles.length)]
+    : null;
+const spawnPentagonTiles = pentagonTiles.filter((tile) => tile !== endPointTile);
 const referenceHexTile = interactiveTiles.find((tile) => tile.userData.sides === 6);
 const baseHexRadius = referenceHexTile?.userData.tileRadius ?? tileThickness * 0.75;
 const ENEMY_RADIUS = baseHexRadius * 0.8;
-const ENEMY_TRAVEL_RADIUS = globeRadius + tileThickness + ENEMY_RADIUS * 0.9;
+const ENEMY_SURFACE_OFFSET = Math.max(tileThickness * 0.05, ENEMY_RADIUS * 0.15);
+const ENEMY_TRAVEL_RADIUS = globeRadius + tileThickness + ENEMY_SURFACE_OFFSET;
 const ENEMY_ANGULAR_SPEED = Math.PI / 12;
 
 const enemyGroup = new THREE.Group();
@@ -103,13 +114,29 @@ const enemyMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.2,
 });
 
+const towerGroup = new THREE.Group();
+globeGroup.add(towerGroup);
+
+const towerColor = new THREE.Color(0x8e44ad);
+const towerBorderColor = new THREE.Color(0xdcc8ff);
+const towerConfig = Object.freeze({
+  heightFactor: 1.7,
+  radiusFactor: 0.6,
+});
+
+const ROUTE_HIGHLIGHT_COLORS = Object.freeze({
+  spawn: new THREE.Color(0x2eff71),
+  target: new THREE.Color(0xff4d4d),
+  path: new THREE.Color(0x9b59ff),
+});
+
 const waveConfig = Object.freeze({
   totalWaves: 10,
   enemiesPerWave: 10,
   spawnInterval: 0.8,
   spawnVariance: 0.3,
-  initialDelay: 1.5,
-  breakDuration: 2.4,
+  initialDelay: 10,
+  breakDuration: 10,
 });
 
 const waveState = {
@@ -118,44 +145,87 @@ const waveState = {
   pendingWaveDelay: waveConfig.initialDelay,
   waveActive: false,
   wavesComplete: false,
-  activeRoute: null,
+  endTile: endPointTile,
+  routesBySpawn: new Map(),
+  highlightedTiles: [],
 };
 
 const enemies = [];
 let spawnCountdown = waveConfig.spawnInterval;
 const tmpDirection = new THREE.Vector3();
-const tmpQuaternion = new THREE.Quaternion();
-const tmpAxis = new THREE.Vector3();
-
 const waveCounterElement = document.getElementById("wave-counter");
 if (!waveCounterElement) {
   throw new Error("Wave counter element missing from the page.");
 }
 updateWaveCounter();
 
+const menuToggleButton = document.getElementById("menu-toggle");
+const gameMenu = document.getElementById("game-menu");
+const gameMenuAction = document.getElementById("game-menu-action");
+let gameHasStarted = false;
+
+if (gameMenu) {
+  document.body.classList.add("menu-open");
+  gameMenu.classList.add("is-visible");
+}
+
+if (menuToggleButton) {
+  menuToggleButton.disabled = true;
+  menuToggleButton.setAttribute("aria-expanded", "true");
+}
+
+let activeHexTile = null;
+
+const buildMenu = document.getElementById("build-menu");
+const buildMenuStatus = document.getElementById("build-menu-status");
+const buildButton = document.getElementById("build-basic-tower");
+if (!buildMenu || !buildMenuStatus || !buildButton) {
+  throw new Error("Build menu elements missing from the page.");
+}
+
+buildButton.addEventListener("click", () => {
+  attemptBuildOnActiveTile();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "1" || event.repeat) {
+    return;
+  }
+  const activeElement = document.activeElement;
+  if (
+    activeElement &&
+    (activeElement.tagName === "INPUT" ||
+      activeElement.tagName === "TEXTAREA" ||
+      activeElement.isContentEditable)
+  ) {
+    return;
+  }
+  attemptBuildOnActiveTile();
+});
+
+if (gameMenuAction) {
+  gameMenuAction.addEventListener("click", () => {
+    startNewGame();
+  });
+}
+
+if (menuToggleButton) {
+  menuToggleButton.addEventListener("click", () => {
+    openGameMenu();
+  });
+}
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && gameMenu && gameMenu.classList.contains("is-visible")) {
+    closeGameMenu();
+  }
+});
+
+updateBuildMenu();
+
 function getNextSpawnTimer() {
   const offset = (Math.random() - 0.5) * waveConfig.spawnVariance;
   return Math.max(0.2, waveConfig.spawnInterval + offset);
-}
-
-function selectWaveRoute() {
-  if (pentagonTiles.length < 2) {
-    return null;
-  }
-  const spawnIndex = Math.floor(Math.random() * pentagonTiles.length);
-  let targetIndex = spawnIndex;
-  let attempts = 0;
-  while (targetIndex === spawnIndex && attempts < pentagonTiles.length * 2) {
-    targetIndex = Math.floor(Math.random() * pentagonTiles.length);
-    attempts += 1;
-  }
-  if (targetIndex === spawnIndex) {
-    targetIndex = (spawnIndex + 1) % pentagonTiles.length;
-  }
-  return {
-    spawnTile: pentagonTiles[spawnIndex],
-    targetTile: pentagonTiles[targetIndex],
-  };
 }
 
 function startNextWave() {
@@ -164,37 +234,40 @@ function startNextWave() {
   if (waveState.currentWaveIndex >= waveConfig.totalWaves) {
     waveState.wavesComplete = true;
     waveState.waveActive = false;
-    waveState.activeRoute = null;
+    clearWaveRouteHighlight();
     updateWaveCounter();
     return;
   }
 
-  const route = selectWaveRoute();
-  if (!route) {
+  if (!prepareNextRoute()) {
     waveState.wavesComplete = true;
     waveState.waveActive = false;
-    waveState.activeRoute = null;
     updateWaveCounter();
     return;
   }
 
-  waveState.activeRoute = route;
   waveState.enemiesSpawned = 0;
   waveState.waveActive = true;
   spawnCountdown = Math.max(0.2, waveConfig.spawnInterval * 0.5);
   updateWaveCounter();
 }
 
+
+
 function queueNextWave(delay = waveConfig.breakDuration) {
   waveState.pendingWaveDelay = Math.max(0, delay);
   waveState.waveActive = false;
-  waveState.activeRoute = null;
+  if (!prepareNextRoute()) {
+    waveState.routesBySpawn = new Map();
+    waveState.wavesComplete = true;
+    waveState.pendingWaveDelay = 0;
+  }
   updateWaveCounter();
 }
 
 function updateWaveCounter() {
   if (waveState.wavesComplete) {
-    waveCounterElement.textContent = `Wave ${waveConfig.totalWaves} / ${waveConfig.totalWaves} — Complete`;
+    waveCounterElement.textContent = `Wave ${waveConfig.totalWaves} / ${waveConfig.totalWaves} � Complete`;
     return;
   }
 
@@ -210,13 +283,13 @@ function updateWaveCounter() {
       0
     );
     const statusLabel = spawnsRemaining > 0 ? `${spawnsRemaining} inbound` : "Engaged";
-    waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves} — ${statusLabel}`;
+    waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves} � ${statusLabel}`;
     return;
   }
 
   if (waveState.pendingWaveDelay > 0) {
     if (waveState.enemiesSpawned >= waveConfig.enemiesPerWave) {
-      waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves} — Cleared`;
+      waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves} � Cleared`;
     } else {
       const nextWaveNumber = Math.min(
         waveState.currentWaveIndex + 2,
@@ -230,68 +303,643 @@ function updateWaveCounter() {
   waveCounterElement.textContent = `Wave ${waveNumber} / ${waveConfig.totalWaves}`;
 }
 
-function spawnEnemy(spawnTileOverride, targetTileOverride) {
-  if (pentagonTiles.length < 2) {
+function updateBuildMenu() {
+  if (!buildMenu || !buildMenuStatus || !buildButton) {
+    return;
+  }
+
+  if (!activeHexTile) {
+    buildMenu.classList.remove("is-visible");
+    buildMenu.setAttribute("aria-hidden", "true");
+    buildButton.disabled = true;
+    buildMenuStatus.textContent = "Select a hex to build.";
+    return;
+  }
+
+  buildMenu.classList.add("is-visible");
+  buildMenu.setAttribute("aria-hidden", "false");
+
+  if (activeHexTile.userData.hasTower) {
+    buildMenuStatus.textContent = "Tower already built on this hex.";
+    buildButton.disabled = true;
+  } else {
+    buildMenuStatus.textContent = "Build a tower on the selected hex.";
+    buildButton.disabled = false;
+  }
+}
+
+function attemptBuildOnActiveTile() {
+  if (!activeHexTile) {
+    updateBuildMenu();
+    return false;
+  }
+  if (activeHexTile.userData.hasTower) {
+    updateBuildMenu();
+    return false;
+  }
+  const built = buildTowerOnTile(activeHexTile);
+  updateBuildMenu();
+  return built;
+}
+
+function buildTowerOnTile(tile) {
+  if (!tile || tile.userData.hasTower) {
     return false;
   }
 
-  const spawnTile =
-    spawnTileOverride ??
-    pentagonTiles[Math.floor(Math.random() * pentagonTiles.length)];
+  const towerHeight = tileThickness * towerConfig.heightFactor;
+  const towerRadius =
+    (tile.userData.tileRadius ?? baseHexRadius) * towerConfig.radiusFactor;
 
-  let targetTile = targetTileOverride ?? spawnTile;
-  let attempts = 0;
-  while (targetTile === spawnTile && attempts < pentagonTiles.length * 2) {
-    targetTile = pentagonTiles[Math.floor(Math.random() * pentagonTiles.length)];
-    attempts += 1;
-  }
-  if (targetTile === spawnTile) {
-    return false;
-  }
-
-  const enemyMesh = new THREE.Mesh(enemyGeometry, enemyMaterial);
-  enemyMesh.castShadow = false;
-  enemyMesh.receiveShadow = false;
-  enemyGroup.add(enemyMesh);
-
-  const startDirection = spawnTile.userData.normal.clone();
-  const endDirection = targetTile.userData.normal.clone();
-  const arc = startDirection.angleTo(endDirection);
-
-  if (!Number.isFinite(arc) || arc <= 0) {
-    enemyGroup.remove(enemyMesh);
-    return false;
-  }
-
-  tmpAxis.copy(startDirection).cross(endDirection);
-  if (tmpAxis.lengthSq() < 1e-6) {
-    const referenceAxis =
-      Math.abs(startDirection.y) < 0.9
-        ? new THREE.Vector3(0, 1, 0)
-        : new THREE.Vector3(1, 0, 0);
-    tmpAxis.copy(startDirection).cross(referenceAxis);
-  }
-  if (tmpAxis.lengthSq() < 1e-6) {
-    tmpAxis.set(0, 0, 1);
-  }
-  tmpAxis.normalize();
-
-  const travelDuration = Math.max(arc / ENEMY_ANGULAR_SPEED, 0.5);
-  enemyMesh.position.copy(startDirection).multiplyScalar(ENEMY_TRAVEL_RADIUS);
-
-  enemies.push({
-    mesh: enemyMesh,
-    startDirection,
-    targetDirection: endDirection,
-    rotationAxis: tmpAxis.clone(),
-    arc,
-    progress: 0,
-    travelDuration,
-    travelRadius: ENEMY_TRAVEL_RADIUS,
-    waveIndex: waveState.waveActive ? waveState.currentWaveIndex : null,
+  const towerGeometry = new THREE.CylinderGeometry(
+    towerRadius,
+    towerRadius * 0.85,
+    towerHeight,
+    16
+  );
+  const towerMaterial = new THREE.MeshStandardMaterial({
+    color: towerColor.clone(),
+    emissive: towerColor.clone().multiplyScalar(0.35),
+    roughness: 0.25,
+    metalness: 0.65,
   });
 
+  const towerMesh = new THREE.Mesh(towerGeometry, towerMaterial);
+  towerMesh.castShadow = false;
+  towerMesh.receiveShadow = false;
+
+  const normal = tile.userData.normal.clone().normalize();
+  const center = tile.userData.center.clone();
+  const elevation = tileThickness * 0.5 + towerHeight * 0.5;
+
+  towerMesh.position.copy(center).add(normal.clone().multiplyScalar(elevation));
+
+  const alignQuaternion = new THREE.Quaternion().setFromUnitVectors(
+    WORLD_UP,
+    normal
+  );
+  towerMesh.quaternion.copy(alignQuaternion);
+
+  towerGroup.add(towerMesh);
+
+  tile.userData.hasTower = true;
+  tile.userData.tower = towerMesh;
+  tile.material.color.copy(towerColor);
+  tile.material.needsUpdate = true;
+  tile.userData.border.material.color.copy(towerBorderColor);
+  tile.userData.border.material.needsUpdate = true;
+  tile.userData.baseFill.copy(tile.material.color);
+  tile.userData.baseBorder.copy(tile.userData.border.material.color);
+
+  recalculateActivePath();
+
   return true;
+}
+
+function clearWaveRouteHighlight() {
+  clearPathHighlight();
+  spawnPentagonTiles.forEach((tile) => {
+    if (!tile) {
+      return;
+    }
+    tile.material.color.copy(tile.userData.baseFill);
+    tile.material.needsUpdate = true;
+    tile.userData.border.material.color.copy(tile.userData.baseBorder);
+    tile.userData.border.material.needsUpdate = true;
+  });
+  const endTile = waveState.endTile ?? endPointTile;
+  if (endTile) {
+    endTile.material.color.copy(endTile.userData.baseFill);
+    endTile.material.needsUpdate = true;
+    endTile.userData.border.material.color.copy(endTile.userData.baseBorder);
+    endTile.userData.border.material.needsUpdate = true;
+  }
+}
+
+function clearPathHighlight() {
+  if (!Array.isArray(waveState.highlightedTiles)) {
+    waveState.highlightedTiles = [];
+  }
+  waveState.highlightedTiles.forEach((tile) => {
+    if (!tile) {
+      return;
+    }
+    tile.material.color.copy(tile.userData.baseFill);
+    tile.material.needsUpdate = true;
+    tile.userData.border.material.color.copy(tile.userData.baseBorder);
+    tile.userData.border.material.needsUpdate = true;
+  });
+  waveState.highlightedTiles = [];
+}
+
+function highlightPathTiles(pathTiles, excludedTiles = []) {
+  clearPathHighlight();
+  if (!Array.isArray(pathTiles) || pathTiles.length === 0) {
+    return;
+  }
+  const excludedSet = new Set((excludedTiles || []).filter(Boolean));
+  const tilesToHighlight = pathTiles.filter((tile) => tile && !excludedSet.has(tile));
+  tilesToHighlight.forEach((tile) => {
+    tile.material.color.copy(ROUTE_HIGHLIGHT_COLORS.path);
+    tile.material.needsUpdate = true;
+    tile.userData.border.material.color.copy(ROUTE_HIGHLIGHT_COLORS.path);
+    tile.userData.border.material.needsUpdate = true;
+  });
+  waveState.highlightedTiles = tilesToHighlight;
+}
+
+function highlightActiveRoutes() {
+  if (!waveState.routesBySpawn || waveState.routesBySpawn.size === 0) {
+    return;
+  }
+
+  const pathSet = new Set();
+  const excludedTiles = [];
+
+  waveState.routesBySpawn.forEach((pathTiles, spawnTile) => {
+    if (spawnTile) {
+      spawnTile.material.color.copy(ROUTE_HIGHLIGHT_COLORS.spawn);
+      spawnTile.material.needsUpdate = true;
+      spawnTile.userData.border.material.color.copy(ROUTE_HIGHLIGHT_COLORS.spawn);
+      spawnTile.userData.border.material.needsUpdate = true;
+      excludedTiles.push(spawnTile);
+    }
+    if (Array.isArray(pathTiles)) {
+      pathTiles.forEach((tile) => pathSet.add(tile));
+    }
+  });
+
+  const endTile = waveState.endTile ?? endPointTile;
+  if (endTile) {
+    endTile.material.color.copy(ROUTE_HIGHLIGHT_COLORS.target);
+    endTile.material.needsUpdate = true;
+    endTile.userData.border.material.color.copy(ROUTE_HIGHLIGHT_COLORS.target);
+    endTile.userData.border.material.needsUpdate = true;
+    excludedTiles.push(endTile);
+  }
+
+  const pathTiles = Array.from(pathSet);
+  highlightPathTiles(pathTiles, excludedTiles);
+}
+
+function synchronizeEnemiesToRoutes() {
+  if (!waveState.routesBySpawn || waveState.routesBySpawn.size === 0) {
+    return;
+  }
+  const availableRoutes = Array.from(waveState.routesBySpawn.entries());
+  if (availableRoutes.length === 0) {
+    return;
+  }
+  for (let i = enemies.length - 1; i >= 0; i -= 1) {
+    const enemy = enemies[i];
+    if (!enemy) {
+      continue;
+    }
+    let spawnTile = enemy.spawnTile;
+    let pathTiles = spawnTile ? waveState.routesBySpawn.get(spawnTile) : null;
+    if (!Array.isArray(pathTiles) || pathTiles.length < 2) {
+      const fallback = availableRoutes[Math.floor(Math.random() * availableRoutes.length)];
+      if (!fallback || !Array.isArray(fallback[1]) || fallback[1].length < 2) {
+        enemyGroup.remove(enemy.mesh);
+        enemies.splice(i, 1);
+        continue;
+      }
+      spawnTile = fallback[0];
+      pathTiles = fallback[1];
+    }
+    assignEnemyPath(enemy, pathTiles, spawnTile);
+  }
+}
+
+
+function clearEnemies() {
+  while (enemies.length > 0) {
+    const enemy = enemies.pop();
+    if (enemy && enemy.mesh) {
+      enemyGroup.remove(enemy.mesh);
+    }
+  }
+}
+
+function clearTowers() {
+  for (let i = towerGroup.children.length - 1; i >= 0; i -= 1) {
+    towerGroup.remove(towerGroup.children[i]);
+  }
+  interactiveTiles.forEach((tile) => {
+    if (!tile.userData) {
+      return;
+    }
+    tile.userData.hasTower = false;
+    tile.userData.tower = null;
+    tile.material.color.copy(tile.userData.baseFill);
+    tile.material.needsUpdate = true;
+    tile.userData.border.material.color.copy(tile.userData.baseBorder);
+    tile.userData.border.material.needsUpdate = true;
+  });
+}
+
+function centerCameraOnEndTile() {
+  const targetTile = waveState.endTile ?? endPointTile;
+  if (!targetTile) {
+    return;
+  }
+  const focusPoint = targetTile.userData.center.clone();
+  const direction = targetTile.userData.normal.clone().normalize();
+  const viewOffset = globeRadius + tileThickness * 3.2;
+  const lateral = new THREE.Vector3().crossVectors(direction, WORLD_UP);
+  if (lateral.lengthSq() === 0) {
+    lateral.set(1, 0, 0);
+  }
+  lateral.normalize().multiplyScalar(globeRadius * 0.25);
+  camera.position.copy(focusPoint.clone().add(direction.multiplyScalar(viewOffset)).add(lateral));
+  controls.target.copy(focusPoint);
+  camera.lookAt(focusPoint);
+  controls.update();
+}
+
+function openGameMenu() {
+  if (!gameMenu) {
+    return;
+  }
+  if (gameMenu.classList.contains("is-visible")) {
+    return;
+  }
+  gameMenu.classList.add("is-visible");
+  document.body.classList.add("menu-open");
+  if (menuToggleButton) {
+    menuToggleButton.disabled = true;
+    menuToggleButton.setAttribute("aria-expanded", "true");
+  }
+  if (gameMenuAction) {
+    const actionLabel = gameHasStarted ? "New Game" : "Start Game";
+    gameMenuAction.textContent = actionLabel;
+    gameMenuAction.setAttribute("aria-label", actionLabel);
+    queueMicrotask(() => gameMenuAction.focus({ preventScroll: true }));
+  }
+}
+
+function closeGameMenu({ focusToggle = true } = {}) {
+  if (!gameMenu) {
+    return;
+  }
+  if (!gameMenu.classList.contains("is-visible")) {
+    return;
+  }
+  gameMenu.classList.remove("is-visible");
+  document.body.classList.remove("menu-open");
+  if (menuToggleButton) {
+    menuToggleButton.disabled = false;
+    menuToggleButton.setAttribute("aria-expanded", "false");
+    if (focusToggle) {
+      queueMicrotask(() => menuToggleButton.focus({ preventScroll: true }));
+    }
+  }
+}
+
+function startNewGame() {
+  clearTowers();
+  clearEnemies();
+  clearWaveRouteHighlight();
+  resetHover();
+  activeHexTile = null;
+  updateBuildMenu();
+
+  waveState.currentWaveIndex = -1;
+  waveState.enemiesSpawned = 0;
+  waveState.pendingWaveDelay = waveConfig.initialDelay;
+  waveState.waveActive = false;
+  waveState.wavesComplete = false;
+  waveState.routesBySpawn = new Map();
+  waveState.highlightedTiles = [];
+  waveState.endTile = endPointTile;
+  spawnCountdown = waveConfig.spawnInterval;
+
+  const prepared = prepareNextRoute();
+  if (!prepared) {
+    highlightActiveRoutes();
+  }
+  centerCameraOnEndTile();
+  updateWaveCounter();
+
+  gameHasStarted = true;
+  if (gameMenuAction) {
+    gameMenuAction.textContent = "New Game";
+    gameMenuAction.setAttribute("aria-label", "New Game");
+  }
+  closeGameMenu({ focusToggle: false });
+  if (menuToggleButton) {
+    menuToggleButton.disabled = false;
+    menuToggleButton.focus({ preventScroll: true });
+  }
+}
+
+
+
+
+function prepareNextRoute() {
+  clearWaveRouteHighlight();
+  if (!endPointTile) {
+    waveState.routesBySpawn = new Map();
+    waveState.highlightedTiles = [];
+    return false;
+  }
+
+  const routes = new Map();
+  const targetTile = waveState.endTile ?? endPointTile;
+
+  spawnPentagonTiles.forEach((spawnTile) => {
+    if (!spawnTile || !targetTile) {
+      return;
+    }
+    const pathTiles = findPathBetweenTiles(spawnTile, targetTile);
+    if (!Array.isArray(pathTiles) || pathTiles.length < 2) {
+      return;
+    }
+    routes.set(spawnTile, pathTiles);
+  });
+
+  waveState.routesBySpawn = routes;
+  if (routes.size === 0) {
+    waveState.routesBySpawn = new Map();
+    waveState.highlightedTiles = [];
+    const endTile = waveState.endTile ?? endPointTile;
+    if (endTile) {
+      endTile.material.color.copy(ROUTE_HIGHLIGHT_COLORS.target);
+      endTile.material.needsUpdate = true;
+      endTile.userData.border.material.color.copy(ROUTE_HIGHLIGHT_COLORS.target);
+      endTile.userData.border.material.needsUpdate = true;
+    }
+    return false;
+  }
+
+  highlightActiveRoutes();
+  synchronizeEnemiesToRoutes();
+  return true;
+}
+
+function buildTileGraph(tiles) {
+  tileGraph.clear();
+  if (!tiles || tiles.length === 0) {
+    return;
+  }
+
+  const normals = tiles.map((tile) => tile.userData.normal.clone().normalize());
+  const adjacency = new Map();
+
+  const angleSamples = [];
+  for (let i = 0; i < normals.length; i += 1) {
+    let minAngle = Infinity;
+    for (let j = 0; j < normals.length; j += 1) {
+      if (i === j) {
+        continue;
+      }
+      const angle = normals[i].angleTo(normals[j]);
+      if (angle < minAngle) {
+        minAngle = angle;
+      }
+    }
+    angleSamples.push(minAngle);
+  }
+
+  const sortedAngles = [...angleSamples].sort((a, b) => a - b);
+  const baseAngle = sortedAngles[Math.floor(sortedAngles.length * 0.5)] * 1.25;
+
+  for (let i = 0; i < tiles.length; i += 1) {
+    const tile = tiles[i];
+    const candidates = [];
+    for (let j = 0; j < tiles.length; j += 1) {
+      if (i === j) {
+        continue;
+      }
+      const angle = normals[i].angleTo(normals[j]);
+      candidates.push({ tile: tiles[j], angle });
+    }
+    candidates.sort((a, b) => a.angle - b.angle);
+    const desiredNeighbors = tile.userData.sides ?? 6;
+    const neighbors = [];
+    for (let k = 0; k < candidates.length && neighbors.length < desiredNeighbors; k += 1) {
+      const candidate = candidates[k];
+      if (candidate.angle <= baseAngle || neighbors.length === 0) {
+        neighbors.push(candidate.tile);
+      }
+    }
+    if (!adjacency.has(tile)) {
+      adjacency.set(tile, new Set());
+    }
+    const neighborSet = adjacency.get(tile);
+    neighbors.forEach((neighbor) => {
+      neighborSet.add(neighbor);
+      if (!adjacency.has(neighbor)) {
+        adjacency.set(neighbor, new Set());
+      }
+      adjacency.get(neighbor).add(tile);
+    });
+  }
+
+  tiles.forEach((tile) => {
+    const neighbors = Array.from(adjacency.get(tile) ?? []);
+    tile.userData.neighbors = neighbors;
+    tileGraph.set(tile, neighbors);
+  });
+}
+
+function findPathBetweenTiles(startTile, targetTile) {
+  if (!startTile || !targetTile) {
+    return null;
+  }
+  if (startTile === targetTile) {
+    return [startTile];
+  }
+  const visited = new Set([startTile]);
+  const queue = [startTile];
+  const parent = new Map();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const neighbors = tileGraph.get(current) ?? current.userData.neighbors ?? [];
+    for (let i = 0; i < neighbors.length; i += 1) {
+      const neighbor = neighbors[i];
+      if (!neighbor || visited.has(neighbor)) {
+        continue;
+      }
+      if (neighbor.userData.hasTower && neighbor !== targetTile) {
+        continue;
+      }
+      visited.add(neighbor);
+      parent.set(neighbor, current);
+      if (neighbor === targetTile) {
+        const path = [neighbor];
+        let backtrack = current;
+        while (backtrack) {
+          path.push(backtrack);
+          backtrack = parent.get(backtrack);
+        }
+        path.reverse();
+        return path;
+      }
+      queue.push(neighbor);
+    }
+  }
+
+  return null;
+}
+
+function recalculateActivePath() {
+  prepareNextRoute();
+}
+
+
+
+
+function calculateSegmentDuration(pathVectors, segmentIndex) {
+  const startVector = pathVectors[segmentIndex];
+  const endVector = pathVectors[segmentIndex + 1];
+  if (!startVector || !endVector) {
+    return 0.2;
+  }
+  const arc = startVector.angleTo(endVector);
+  if (!Number.isFinite(arc) || arc <= 0) {
+    return 0.2;
+  }
+  return Math.max(arc / ENEMY_ANGULAR_SPEED, 0.2);
+}
+
+function computePathVectors(pathTiles) {
+  if (!Array.isArray(pathTiles)) {
+    return [];
+  }
+  return pathTiles.map((tile) => tile.userData.normal.clone());
+}
+
+function assignEnemyPath(enemy, pathTiles, spawnTileOverride) {
+  if (!Array.isArray(pathTiles) || pathTiles.length < 2) {
+    return;
+  }
+  const newVectors = computePathVectors(pathTiles);
+  const segmentsNew = newVectors.length - 1;
+  if (segmentsNew <= 0) {
+    return;
+  }
+
+  const previousVectors = enemy.pathVectors ?? [];
+  const segmentsOld = Math.max(previousVectors.length - 1, 1);
+  let previousProgress = 0;
+  if (segmentsOld > 0) {
+    previousProgress = (enemy.segmentIndex ?? 0) + Math.max(Math.min(enemy.segmentProgress ?? 0, 1), 0);
+    previousProgress = Math.min(Math.max(previousProgress / segmentsOld, 0), 1);
+  }
+
+  const totalSegmentsNew = segmentsNew;
+  const newPosition = previousProgress * totalSegmentsNew;
+  const newIndex = Math.min(Math.floor(newPosition), totalSegmentsNew - 1);
+  const newProgress = Math.min(Math.max(newPosition - newIndex, 0), 0.999);
+
+  enemy.pathVectors = newVectors;
+  enemy.segmentIndex = Math.max(0, newIndex);
+  enemy.segmentProgress = newProgress;
+  enemy.segmentDuration = calculateSegmentDuration(enemy.pathVectors, enemy.segmentIndex);
+  if (!Number.isFinite(enemy.segmentDuration) || enemy.segmentDuration <= 0) {
+    enemy.segmentDuration = 0.2;
+  }
+
+  const startVector = enemy.pathVectors[enemy.segmentIndex];
+  const endVector = enemy.pathVectors[enemy.segmentIndex + 1] ?? startVector;
+  const progress = Math.min(Math.max(enemy.segmentProgress, 0), 1);
+  tmpDirection.set(0, 0, 0);
+  if (startVector && endVector && typeof tmpDirection.slerpVectors === "function") {
+    tmpDirection.slerpVectors(startVector, endVector, progress);
+  } else if (startVector && endVector && typeof startVector.slerp === "function") {
+    tmpDirection.copy(startVector).slerp(endVector, progress);
+  } else if (startVector && endVector) {
+    tmpDirection.lerpVectors(startVector, endVector, progress);
+  } else if (startVector) {
+    tmpDirection.copy(startVector);
+  }
+
+  if (tmpDirection.lengthSq() === 0 && startVector) {
+    tmpDirection.copy(startVector);
+  }
+
+  tmpDirection
+    .normalize()
+    .multiplyScalar(enemy.travelRadius ?? ENEMY_TRAVEL_RADIUS);
+
+  enemy.mesh.position.copy(tmpDirection);
+  enemy.spawnTile = spawnTileOverride ?? pathTiles[0] ?? enemy.spawnTile ?? null;
+}
+
+function spawnEnemy(spawnTileOverride, targetTileOverride) {
+  if (!waveState.routesBySpawn || waveState.routesBySpawn.size === 0) {
+    if (!prepareNextRoute()) {
+      return false;
+    }
+  }
+
+  const availableRoutes = Array.from(waveState.routesBySpawn.entries());
+  if (availableRoutes.length === 0) {
+    return false;
+  }
+
+  const spawnChoices = spawnTileOverride
+    ? [spawnTileOverride]
+    : availableRoutes.map(([spawn]) => spawn);
+
+  while (spawnChoices.length > 0) {
+    const choiceIndex = Math.floor(Math.random() * spawnChoices.length);
+    const spawnTile = spawnChoices.splice(choiceIndex, 1)[0];
+    if (!spawnTile) {
+      continue;
+    }
+
+    const targetTile = targetTileOverride ?? waveState.endTile ?? endPointTile;
+    if (!targetTile) {
+      return false;
+    }
+
+    let pathTiles = waveState.routesBySpawn.get(spawnTile);
+    if (!Array.isArray(pathTiles) || pathTiles.length < 2) {
+      pathTiles = findPathBetweenTiles(spawnTile, targetTile);
+      if (!Array.isArray(pathTiles) || pathTiles.length < 2) {
+        waveState.routesBySpawn.delete(spawnTile);
+        continue;
+      }
+      waveState.routesBySpawn.set(spawnTile, pathTiles);
+      highlightActiveRoutes();
+    }
+
+    const enemyMesh = new THREE.Mesh(enemyGeometry, enemyMaterial);
+    enemyMesh.castShadow = false;
+    enemyMesh.receiveShadow = false;
+    enemyGroup.add(enemyMesh);
+
+    const pathVectors = computePathVectors(pathTiles);
+    if (!Array.isArray(pathVectors) || pathVectors.length < 2) {
+      enemyGroup.remove(enemyMesh);
+      waveState.routesBySpawn.delete(spawnTile);
+      continue;
+    }
+    const travelRadius = ENEMY_TRAVEL_RADIUS;
+    enemyMesh.position.copy(pathVectors[0]).multiplyScalar(travelRadius);
+
+    const segmentDuration = calculateSegmentDuration(pathVectors, 0);
+
+    enemies.push({
+      mesh: enemyMesh,
+      pathVectors,
+      segmentIndex: 0,
+      segmentProgress: 0,
+      segmentDuration: Number.isFinite(segmentDuration) && segmentDuration > 0
+        ? segmentDuration
+        : 0.2,
+      travelRadius,
+      waveIndex: waveState.waveActive ? waveState.currentWaveIndex : null,
+      spawnTile,
+    });
+
+    return true;
+  }
+
+  return false;
 }
 
 function updateEnemies(delta) {
@@ -306,10 +954,7 @@ function updateEnemies(delta) {
     } else if (waveState.enemiesSpawned < waveConfig.enemiesPerWave) {
       spawnCountdown -= delta;
       if (spawnCountdown <= 0) {
-        const spawned = spawnEnemy(
-          waveState.activeRoute?.spawnTile,
-          waveState.activeRoute?.targetTile
-        );
+        const spawned = spawnEnemy();
         if (spawned) {
           waveState.enemiesSpawned += 1;
         }
@@ -321,21 +966,79 @@ function updateEnemies(delta) {
 
   for (let i = enemies.length - 1; i >= 0; i -= 1) {
     const enemy = enemies[i];
-    enemy.progress += delta / enemy.travelDuration;
-
-    if (enemy.progress >= 1) {
-      enemyGroup.remove(enemy.mesh);
+    if (!enemy || !enemy.pathVectors || enemy.pathVectors.length < 2) {
+      if (enemy) {
+        enemyGroup.remove(enemy.mesh);
+      }
       enemies.splice(i, 1);
       continue;
     }
 
-    const rotationAngle = enemy.arc * Math.min(enemy.progress, 1);
-    const travelRadius = enemy.travelRadius ?? ENEMY_TRAVEL_RADIUS;
-    tmpQuaternion.setFromAxisAngle(enemy.rotationAxis, rotationAngle);
+    let remainingDelta = delta;
+    let enemyRemoved = false;
+
+    while (remainingDelta > 0 && !enemyRemoved) {
+      if (enemy.segmentIndex >= enemy.pathVectors.length - 1) {
+        enemyGroup.remove(enemy.mesh);
+        enemies.splice(i, 1);
+        enemyRemoved = true;
+        break;
+      }
+
+      if (!Number.isFinite(enemy.segmentDuration) || enemy.segmentDuration <= 0) {
+        enemy.segmentDuration = calculateSegmentDuration(enemy.pathVectors, enemy.segmentIndex);
+        if (!Number.isFinite(enemy.segmentDuration) || enemy.segmentDuration <= 0) {
+          enemy.segmentDuration = 0.2;
+        }
+      }
+
+      const increment = remainingDelta / enemy.segmentDuration;
+      enemy.segmentProgress += increment;
+
+      if (enemy.segmentProgress < 1) {
+        remainingDelta = 0;
+        break;
+      }
+
+      remainingDelta = (enemy.segmentProgress - 1) * enemy.segmentDuration;
+      enemy.segmentIndex += 1;
+
+      if (enemy.segmentIndex >= enemy.pathVectors.length - 1) {
+        enemyGroup.remove(enemy.mesh);
+        enemies.splice(i, 1);
+        enemyRemoved = true;
+        break;
+      }
+
+      enemy.segmentProgress = 0;
+      enemy.segmentDuration = calculateSegmentDuration(enemy.pathVectors, enemy.segmentIndex);
+    }
+
+    if (enemyRemoved) {
+      continue;
+    }
+
+    const startVector = enemy.pathVectors[enemy.segmentIndex];
+    const endVector = enemy.pathVectors[enemy.segmentIndex + 1];
+    const progress = Math.min(Math.max(enemy.segmentProgress, 0), 1);
+    tmpDirection.set(0, 0, 0);
+    if (startVector && endVector && typeof startVector.slerp === "function") {
+      tmpDirection.copy(startVector).slerp(endVector, progress);
+    } else if (startVector && endVector && typeof tmpDirection.slerpVectors === "function") {
+      tmpDirection.slerpVectors(startVector, endVector, progress);
+    } else if (startVector && endVector) {
+      tmpDirection.lerpVectors(startVector, endVector, progress);
+    } else if (startVector) {
+      tmpDirection.copy(startVector);
+    }
+
+    if (tmpDirection.lengthSq() === 0 && startVector) {
+      tmpDirection.copy(startVector);
+    }
+
     tmpDirection
-      .copy(enemy.startDirection)
-      .applyQuaternion(tmpQuaternion)
-      .multiplyScalar(travelRadius);
+      .normalize()
+      .multiplyScalar(enemy.travelRadius ?? ENEMY_TRAVEL_RADIUS);
 
     enemy.mesh.position.copy(tmpDirection);
   }
@@ -347,9 +1050,9 @@ function updateEnemies(delta) {
 
   if (waveFinished) {
     if (waveState.currentWaveIndex >= waveConfig.totalWaves - 1) {
+      clearWaveRouteHighlight();
       waveState.wavesComplete = true;
       waveState.waveActive = false;
-      waveState.activeRoute = null;
       waveState.pendingWaveDelay = 0;
       updateWaveCounter();
     } else {
@@ -358,10 +1061,13 @@ function updateEnemies(delta) {
   }
 }
 
+
+
+
+
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let hoveredTile = null;
-let activeHexTile = null;
 let touchPointerDown = null;
 
 function isTouchLike(event) {
@@ -395,12 +1101,14 @@ function applyHover(mesh) {
 
 function setActiveTile(mesh) {
   if (mesh.userData.sides !== 6) {
+    updateBuildMenu();
     return;
   }
   if (activeHexTile === mesh) {
     mesh.material.color.copy(mesh.userData.baseFill);
     mesh.userData.active = false;
     activeHexTile = null;
+    updateBuildMenu();
     return;
   }
   if (activeHexTile) {
@@ -410,6 +1118,7 @@ function setActiveTile(mesh) {
   activeHexTile = mesh;
   mesh.material.color.copy(activeHexColor);
   mesh.userData.active = true;
+  updateBuildMenu();
 }
 
 function handlePointerMove(event) {
@@ -477,6 +1186,11 @@ function selectTileUnderPointer(event) {
   const intersections = raycaster.intersectObjects(interactiveTiles, false);
   if (intersections.length > 0) {
     setActiveTile(intersections[0].object);
+  } else if (activeHexTile) {
+    activeHexTile.material.color.copy(activeHexTile.userData.baseFill);
+    activeHexTile.userData.active = false;
+    activeHexTile = null;
+    updateBuildMenu();
   }
 }
 
@@ -635,6 +1349,8 @@ function createGoldbergSphere(radius, thickness, frequency) {
       normal: normal.clone(),
       center: centerPoint.clone(),
       tileRadius: ringRadius,
+      hasTower: false,
+      tower: null,
     };
 
     if (isPentagon) {
@@ -757,3 +1473,11 @@ function createHalo(radius) {
   halo.renderOrder = -1;
   return halo;
 }
+
+
+
+
+
+
+
+
