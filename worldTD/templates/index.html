@@ -33,9 +33,63 @@
         <button id="game-menu-action" type="button">Start Game</button>
       </div>
     </div>
-    <div id="build-menu" role="dialog" aria-hidden="true">
-      <p id="build-menu-status">Select a hex to build.</p>
-      <button id="build-basic-tower" type="button">Build Sentinel Tower</button>
+    <div id="build-menu" role="complementary" aria-hidden="true">
+      <div class="tower-panel">
+        <h2 class="tower-panel__title">Tower Arsenal</h2>
+        <div class="tower-panel__list" role="list">
+          <button id="build-basic-tower" type="button" class="tower-card tower-card--available" role="listitem">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Sentinel Tower</span>
+                <span class="tower-card__hotkey">(Hotkey 1)</span>
+              </div>
+              <p class="tower-card__description">Reliable single-target beam. Range: medium. Damage: moderate.</p>
+            </div>
+          </button>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 2</span>
+                <span class="tower-card__hotkey">(Hotkey 2)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 3</span>
+                <span class="tower-card__hotkey">(Hotkey 3)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 4</span>
+                <span class="tower-card__hotkey">(Hotkey 4)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 5</span>
+                <span class="tower-card__hotkey">(Hotkey 5)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+        </div>
+        <p id="build-menu-status" class="tower-panel__status">Select a hex to build.</p>
+      </div>
     </div>
     <div id="game-over" role="dialog" aria-hidden="true">
       <div class="game-over-panel">
@@ -49,5 +103,7 @@
     <script src="{{ url_for('static', filename='js/globe.js') }}" type="module"></script>
   </body>
 </html>
+
+
 
 

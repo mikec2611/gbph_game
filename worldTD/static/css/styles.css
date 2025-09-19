@@ -50,7 +50,6 @@ canvas {
   letter-spacing: 0.02em;
   line-height: 1.45;
   text-transform: none;
-  pointer-events: none;
   z-index: 20;
   backdrop-filter: blur(6px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -66,27 +65,145 @@ canvas {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
-#build-menu {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: none;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 18px;
-  background: rgba(6, 12, 26, 0.82);
-  border: 1px solid rgba(130, 170, 255, 0.4);
-  border-radius: 14px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px);
-  font-size: 0.9rem;
-  color: #f4f6ff;
-  z-index: 25;
+#build-menu {
+  position: fixed;
+  top: 120px;
+  left: 32px;
+  transform: none;
+  display: none;
+  width: 320px;
+  z-index: 25;
 }
 
-#build-menu.is-visible {
-  display: flex;
+#build-menu.is-visible {
+  display: block;
+}
+
+.tower-panel {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 22px;
+  background: rgba(6, 12, 26, 0.85);
+  border: 1px solid rgba(130, 170, 255, 0.35);
+  border-radius: 18px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(12px);
+  color: #f4f6ff;
+  font-size: 0.95rem;
+}
+
+.tower-panel__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tower-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tower-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(155, 196, 255, 0.45);
+  background: rgba(40, 72, 142, 0.15);
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  transition: border 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+button.tower-card {
+  cursor: pointer;
+  background: rgba(67, 118, 255, 0.35);
+}
+
+button.tower-card.tower-card--ready {
+  border-color: rgba(188, 232, 255, 0.9);
+  background: rgba(98, 148, 255, 0.55);
+  box-shadow: 0 10px 26px rgba(40, 82, 180, 0.35);
+}
+
+button.tower-card:hover:not(:disabled),
+button.tower-card:focus-visible {
+  border-color: rgba(178, 220, 255, 0.8);
+  background: rgba(82, 132, 255, 0.45);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+button.tower-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  background: rgba(67, 118, 255, 0.18);
+  border-color: rgba(120, 160, 255, 0.25);
+}
+
+.tower-card--locked {
+  opacity: 0.4;
+  border-style: dashed;
+}
+
+.tower-card__icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  border: 2px solid rgba(167, 210, 255, 0.7);
+  background: rgba(25, 46, 98, 0.55);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tower-card__details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tower-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.tower-card__name {
+  font-size: 1.05rem;
+}
+
+.tower-card__hotkey {
+  font-size: 0.85rem;
+  color: rgba(226, 235, 255, 0.75);
+}
+
+.tower-card__description {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  color: rgba(226, 235, 255, 0.78);
+}
+
+.tower-panel__status,
+#build-menu-status {
+  margin: 4px 0 0;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(226, 235, 255, 0.85);
 }
 
 #build-menu-status {
@@ -95,30 +212,7 @@ canvas {
   letter-spacing: 0.04em;
 }
 
-#build-basic-tower {
-  border: 1px solid rgba(155, 196, 255, 0.5);
-  background: rgba(67, 118, 255, 0.55);
-  color: #f6f8ff;
-  padding: 8px 14px;
-  border-radius: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease, border 0.2s ease;
-}
 
-#build-basic-tower:hover:not(:disabled) {
-  background: rgba(93, 140, 255, 0.75);
-  border-color: rgba(167, 210, 255, 0.7);
-  transform: translateY(-1px);
-}
-
-#build-basic-tower:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  background: rgba(67, 118, 255, 0.25);
-  border-color: rgba(120, 160, 255, 0.25);
-}
 
 #menu-toggle {
   position: fixed;
@@ -232,7 +326,6 @@ body.menu-open #menu-toggle {
   font-size: inherit;
   letter-spacing: inherit;
   text-transform: inherit;
-  pointer-events: none;
   z-index: auto;
 }
 
@@ -300,4 +393,22 @@ body.menu-open #menu-toggle {
   display: block;
 }
 
+
+
+
+
+
+
+
+
+
+.tower-card--locked .tower-card__icon {
+  border-color: rgba(167, 210, 255, 0.35);
+  background: rgba(25, 46, 98, 0.25);
+}
+
+.tower-card--locked .tower-card__hotkey,
+.tower-card--locked .tower-card__description {
+  color: rgba(226, 235, 255, 0.55);
+}
 

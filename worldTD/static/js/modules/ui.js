@@ -190,6 +190,8 @@ export function initUI({
   }
 
   function updateBuildMenu(activeHexTile) {
+    buildButton.classList.remove("tower-card--ready");
+
     if (!activeHexTile) {
       buildMenu.classList.remove("is-visible");
       buildMenu.setAttribute("aria-hidden", "true");
@@ -204,9 +206,11 @@ export function initUI({
     if (activeHexTile.userData.hasTower) {
       buildMenuStatus.textContent = "Tower already built on this hex.";
       buildButton.disabled = true;
+      buildButton.classList.remove("tower-card--ready");
     } else {
-      buildMenuStatus.textContent = "Build a tower on the selected hex.";
+      buildMenuStatus.textContent = "Deploy the Sentinel Tower on this hex.";
       buildButton.disabled = false;
+      buildButton.classList.add("tower-card--ready");
     }
   }
 
@@ -257,6 +261,9 @@ export function initUI({
     setGameStarted,
   };
 }
+
+
+
 
 
 
