@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
@@ -15,8 +15,95 @@
     </script>
   </head>
   <body>
+    <div id="hud" aria-live="polite" aria-atomic="true">
+      <span id="life-counter">Player Lives: 20</span>
+      <span id="wave-counter">Wave 1/10 - Preparing</span>
+      <span id="wave-timer" aria-live="polite">Time Until Next Wave 10s</span>
+    </div>
+    <button id="menu-toggle" type="button" aria-haspopup="dialog" aria-controls="game-menu" aria-expanded="true">Menu</button>
+    <div id="game-menu" role="dialog" aria-modal="true" class="is-visible">
+      <div class="menu-panel">
+        <h1>World Tower Defense</h1>
+        <p>Keep creeps from reaching the red pentagon. Build towers to bend their routes across the globe.</p>
+        <ul>
+          <li>Click a hex to select it, then press the tower button or hit <kbd>1</kbd>.</li>
+          <li>Towers reroute paths-use them to lengthen the journey to the end point.</li>
+          <li>Use the menu to pause, reread these tips, or start a fresh run any time.</li>
+        </ul>
+        <button id="game-menu-action" type="button">Start Game</button>
+      </div>
+    </div>
+    <div id="build-menu" role="complementary" aria-hidden="true">
+      <div class="tower-panel">
+        <h2 class="tower-panel__title">Tower Arsenal</h2>
+        <div class="tower-panel__list" role="list">
+          <button id="build-basic-tower" type="button" class="tower-card tower-card--available" role="listitem">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Sentinel Tower</span>
+                <span class="tower-card__hotkey">(Hotkey 1)</span>
+              </div>
+              <p class="tower-card__description">Reliable single-target beam. Range: medium. Damage: moderate.</p>
+            </div>
+          </button>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 2</span>
+                <span class="tower-card__hotkey">(Hotkey 2)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 3</span>
+                <span class="tower-card__hotkey">(Hotkey 3)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 4</span>
+                <span class="tower-card__hotkey">(Hotkey 4)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+          <div class="tower-card tower-card--locked" role="listitem" aria-disabled="true">
+            <span class="tower-card__icon" aria-hidden="true"></span>
+            <div class="tower-card__details">
+              <div class="tower-card__header">
+                <span class="tower-card__name">Tower Slot 5</span>
+                <span class="tower-card__hotkey">(Hotkey 5)</span>
+              </div>
+              <p class="tower-card__description">Coming soon.</p>
+            </div>
+          </div>
+        </div>
+        <p id="build-menu-status" class="tower-panel__status">Select a hex to build.</p>
+      </div>
+    </div>
+    <div id="game-over" role="dialog" aria-hidden="true">
+      <div class="game-over-panel">
+        <h2>Game Over</h2>
+        <p id="game-over-message">You made it to Wave 1.</p>
+        <button id="game-over-action" type="button">Play Again</button>
+      </div>
+    </div>
     <div id="globe-container" aria-label="Interactive hex globe" role="application"></div>
 
     <script src="{{ url_for('static', filename='js/globe.js') }}" type="module"></script>
   </body>
 </html>
+
+
+
+
