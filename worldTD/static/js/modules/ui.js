@@ -189,14 +189,14 @@ export function initUI({
     waveTimerElement.textContent = timerLabel;
   }
 
-  function updateBuildMenu(activeHexTile) {
+  function updateBuildMenu(activeHexTile, { statusMessage, forceDisabled = false } = {}) {
     buildButton.classList.remove("tower-card--ready");
 
     if (!activeHexTile) {
       buildMenu.classList.remove("is-visible");
       buildMenu.setAttribute("aria-hidden", "true");
       buildButton.disabled = true;
-      buildMenuStatus.textContent = "Select a hex to build.";
+      buildMenuStatus.textContent = statusMessage ?? "Select a hex to build.";
       return;
     }
 
@@ -204,14 +204,21 @@ export function initUI({
     buildMenu.setAttribute("aria-hidden", "false");
 
     if (activeHexTile.userData.hasTower) {
-      buildMenuStatus.textContent = "Tower already built on this hex.";
+      buildMenuStatus.textContent = statusMessage ?? "Tower already built on this hex.";
+      buildButton.disabled = true;
+      buildButton.classList.remove("tower-card--ready");
+      return;
+    }
+
+    if (forceDisabled) {
       buildButton.disabled = true;
       buildButton.classList.remove("tower-card--ready");
     } else {
-      buildMenuStatus.textContent = "Deploy the Sentinel Tower on this hex.";
       buildButton.disabled = false;
       buildButton.classList.add("tower-card--ready");
     }
+
+    buildMenuStatus.textContent = statusMessage ?? "Deploy the Sentinel Tower on this hex.";
   }
 
   function updateLifeCounter(lives) {
@@ -261,6 +268,11 @@ export function initUI({
     setGameStarted,
   };
 }
+
+
+
+
+
 
 
 

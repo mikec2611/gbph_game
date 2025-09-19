@@ -11,6 +11,7 @@ export function createTowerManager({
   tileGraph,
   onPathRecalculated,
   updateBuildMenu,
+  canPlaceTower,
 }) {
   if (!towerGroup) {
     throw new Error("Tower group missing from tower manager initialization.");
@@ -82,6 +83,17 @@ export function createTowerManager({
       }
       return false;
     }
+
+    if (typeof canPlaceTower === "function" && !canPlaceTower(activeHexTile)) {
+      if (typeof updateBuildMenu === "function") {
+        updateBuildMenu(activeHexTile, {
+          statusMessage: "Cannot block all routes. Choose another hex.",
+          forceDisabled: true,
+        });
+      }
+      return false;
+    }
+
     const built = buildTowerOnTile(activeHexTile);
     if (typeof updateBuildMenu === "function") {
       updateBuildMenu(activeHexTile);
@@ -311,3 +323,7 @@ export function createTowerManager({
     getActiveTile: () => activeHexTile,
   };
 }
+
+
+
+

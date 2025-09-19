@@ -324,6 +324,50 @@ export function createWaveController({
     return true;
   }
 
+  function canPlaceTowerOnTile(candidateTile) {
+    if (!candidateTile) {
+      return false;
+    }
+
+    if (candidateTile.userData?.hasTower) {
+      return false;
+    }
+
+    const targetTile = waveState.endTile ?? endPointTile;
+    if (!targetTile) {
+      return true;
+    }
+
+    const activeSpawns = spawnPentagonTiles.filter(Boolean);
+    if (activeSpawns.length === 0) {
+      return true;
+    }
+
+    if (activeSpawns.includes(candidateTile)) {
+      return false;
+    }
+
+    const previousState = candidateTile.userData.hasTower;
+    candidateTile.userData.hasTower = true;
+
+    let allSpawnsReachTarget = true;
+    for (let i = 0; i < activeSpawns.length; i += 1) {
+      const spawnTile = activeSpawns[i];
+      if (!spawnTile) {
+        continue;
+      }
+
+      const path = findPathBetweenTiles(tileGraph, spawnTile, targetTile);
+      if (!Array.isArray(path) || path.length < 2) {
+        allSpawnsReachTarget = false;
+        break;
+      }
+    }
+
+    candidateTile.userData.hasTower = previousState;
+    return allSpawnsReachTarget;
+  }
+
   function recalculateActivePath() {
     prepareNextRoute();
   }
@@ -722,7 +766,14 @@ export function createWaveController({
     synchronizeEnemiesToRoutes,
     prepareNextRoute,
     recalculateActivePath,
+    canPlaceTowerOnTile,
     clearAllEnemies,
     highlightActiveRoutes,
   };
 }
+
+
+
+
+
+

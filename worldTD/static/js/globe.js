@@ -72,6 +72,7 @@ const towerManager = createTowerManager({
   tileGraph,
   onPathRecalculated: waveController.recalculateActivePath,
   updateBuildMenu: ui.updateBuildMenu,
+  canPlaceTower: waveController.canPlaceTowerOnTile,
 });
 
 const interactionController = createInteractionController({
@@ -228,6 +229,7 @@ function animate() {
 
 resizeRenderer();
 animate();
+
 
 
 
